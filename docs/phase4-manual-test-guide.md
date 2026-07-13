@@ -25,19 +25,35 @@ this guide covers the minimum single-photo validation for Issue #15 itself.
 
 While writing `tests/camera/test_capture.py`, `cv2.VideoCapture(0)` was
 found to unexpectedly succeed in this specific sandbox: `v4l2-ctl
---list-devices` reports a device named `AvataCam
+--list-devices` reported a device named `AvataCam
 (platform:v4l2loopback-000)` at `/dev/video0`/`/dev/video1`, which OpenCV
 opens and reads frames from without error. This is some sandbox-provided
 synthetic/virtual video source (a `v4l2loopback` device, not physical camera
 hardware), and its frames are not photographs of anything - they must not be
 treated as, or reported as, a real camera capture. The test suite avoids
-this device entirely (it tests the failure path via a deliberately
+device `0` entirely (it tests the failure path via a deliberately
 out-of-range device index instead) specifically so it does not
-accidentally rely on this artifact. If you (the human running real
-validation) are working in an environment where an index like `0` maps to
-this same kind of virtual/synthetic device rather than your real webcam,
-double check `v4l2-ctl --list-devices` (Linux) or your OS's camera device
-list before assuming `device_index=0` is your physical camera.
+accidentally rely on this artifact.
+
+**This mapping is not stable across sandbox sessions.** In the session where
+Issue #18 (live demo) was built, `v4l2-ctl --list-devices` instead reported:
+
+```text
+AvataCam (platform:v4l2loopback-000):
+        /dev/video2
+
+USB 2.0 Camera: USB 2.0 Camera (usb-0000:12:00.0-3):
+        /dev/video0
+        /dev/video1
+```
+
+i.e. the *opposite* of the mapping above - `/dev/video0`/`/dev/video1` were
+a real USB camera, and the `v4l2loopback` virtual device was `/dev/video2`.
+A working X11/Wayland display was also present in that session. Do not
+assume either mapping. **Always run `v4l2-ctl --list-devices` (Linux) or
+check your OS's camera device list yourself** before assuming any
+`device_index` is your physical camera - including before running `hex8
+live-demo --device N` (see below).
 
 ## Step 1: Generate a marker
 
@@ -138,6 +154,77 @@ photo's specular highlights, screen moire, or focus blur don't map 1:1 to
 any single synthetic degradation type; `NO_MARKER_DETECTED` /
 `HEADER_INVALID` / `RS_CORRECTION_FAILED` / `CRC_MISMATCH` are what you can
 actually act on when debugging a bad real-world capture.
+
+## Live demo (Issue #18)
+
+For an interactive, visual alternative to Steps 3-4 above, `hex8 live-demo`
+opens a continuous camera preview window and overlays the decode result on
+each frame in real time - no need to save a photo and decode it separately.
+
+Requires the `demo` extras group *instead of* `decoder`:
+
+```sh
+pip install -e ".[demo]"
+```
+
+`demo` installs plain `opencv-python` (not `opencv-python-headless`: the
+headless build has no GUI window support - `cv2.imshow` does not work with
+it, which is why it is a separate extras group from `decoder`) plus
+`scikit-image`, so `demo` alone is enough to run the full decode pipeline -
+you do not need to also install `decoder`. Do not install both `decoder`
+and `demo` in the same environment: `opencv-python` and
+`opencv-python-headless` conflict at the package level.
+
+```sh
+hex8 live-demo --device N   # verify N via v4l2-ctl --list-devices first
+```
+
+Point the camera at a marker (rendered on screen, or the printed page from
+Step 2). The preview window overlays:
+
+- **Green** outline around the detected marker + the decoded payload
+  (as text if valid UTF-8, otherwise a hex dump) and its byte count, on a
+  successful decode.
+- **Red** outline (if a marker was located but decoding failed) or no
+  outline (if no marker was located at all) + the `failure_category` name,
+  on a failed decode - see the table in Step 4 above for what each category
+  means.
+
+Press `q` with the preview window focused to quit.
+
+The frame-by-frame decode/overlay logic (`hex8.camera.live_demo`) is unit
+tested against real synthetic marker images (`tests/camera/test_live_demo.py`);
+the `cv2.imshow` event loop itself is not automated and is only verified by
+running the command above against a real camera, per this guide.
+
+**Tip - use a payload close to the README's realistic target (128-256
+bytes)** when trying this out. A much smaller payload (a short "hello
+world" string, say) at radius 18-20 renders with a large contiguous blank
+region on one side of the marker - a real, separately-tracked cosmetic
+issue (Issue #19: unused `DATA` cells cluster on one side rather than
+scattering evenly), not a bug in the live demo itself. It can look enough
+like a broken/corrupted render to cause exactly this kind of confusion
+during manual testing, so don't mistake it for a live-demo problem.
+
+### Verified
+
+This command was manually verified in this project's sandbox: a marker
+rendered via `hex8 encode` was fed into the sandbox's `v4l2loopback`
+device (`/dev/video2` in that session - see the sandbox note above) with
+`ffmpeg`, and `hex8 live-demo --device 2`'s preview window was confirmed
+via screenshot to show a correctly-positioned green outline and legible
+"DECODED (200 bytes): ..." text for a successful decode, and legible
+"NO_MARKER_DETECTED" text for a non-marker frame. This confirms the
+live-demo code path itself works correctly; it is **not** equivalent to
+Issue #16's real-camera-hardware acceptance criterion (see the sandbox
+note above for why this virtual device must not be conflated with a real
+camera).
+
+One real bug was caught and fixed during this verification: `cv2.putText`'s
+plain white status text was invisible against the marker's own white
+background (and would be against any light-colored real-world scene) -
+fixed by drawing a solid dark rectangle behind the text before drawing it,
+per `hex8/camera/live_demo.py`'s `render_overlay`.
 
 ## What happens next (Issue #16)
 

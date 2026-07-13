@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 decoder = ["opencv-python-headless>=4.9", "scikit-image>=0.22"]
+demo = ["opencv-python>=4.9", "scikit-image>=0.22"]
 dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.4"]
 
 [project.scripts]

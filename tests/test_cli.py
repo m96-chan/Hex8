@@ -1,4 +1,5 @@
-"""Tests for hex8.cli (Issue #8's `hex8 encode` and Issue #12's `hex8 decode` CLI)."""
+"""Tests for hex8.cli (Issue #8's `hex8 encode`, Issue #12's `hex8 decode`, and
+Issue #18's `hex8 live-demo` CLI)."""
 
 from PIL import Image
 
@@ -90,3 +91,15 @@ def test_cli_decode_rejects_svg_input(tmp_path):
 
     assert exit_code != 0
     assert not output_path.exists()
+
+
+def test_cli_live_demo_reports_an_error_for_an_unavailable_camera_device():
+    """Real `cv2.VideoCapture` code hitting an honest failure, not a mocked
+    stand-in - see the note in `tests/camera/test_capture.py` about why
+    device index 0 is not a safe stand-in for "no camera" in this sandbox
+    (it may resolve to a virtual v4l2loopback device); a deliberately
+    out-of-range index is used instead, exercising `_run_live_demo`'s error
+    path before any GUI window is opened."""
+    exit_code = main(["live-demo", "--device", "999"])
+
+    assert exit_code != 0

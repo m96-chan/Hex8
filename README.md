@@ -508,7 +508,7 @@ cell symbol + confidence
 ## Current Status
 
 Phases 1-3 complete and tested; Phase 4 pipeline built, pending real-world
-validation.
+validation. A live camera demo (Issue #18) is also done.
 
 ```text
 Hex8 Marker v0
@@ -534,9 +534,44 @@ ideal + mild-degradation-tolerant decoder
   numbers (15/40 -> 34/40 synthetic test cases).
 - **Phase 4 (Camera test)**: pipeline built (`hex8.camera.capture`:
   file/live-device ingestion + failure-categorized decoding), but **not yet
-  validated against a real camera or printer** - this project's dev
-  environment has neither. See `docs/phase4-manual-test-guide.md` for the
-  steps to run that validation with real hardware.
+  validated against a real camera or printer** by a human running the
+  Issue #15/#16 field-test steps. (Earlier revisions of this README claimed
+  this project's dev environment has no camera hardware at all; that turned
+  out to be environment-dependent - some sandboxes for this project do have
+  a real USB camera and a working display attached, see
+  `docs/phase4-manual-test-guide.md`'s sandbox note - but that is not the
+  same as the acceptance criterion being met.) See
+  `docs/phase4-manual-test-guide.md` for the steps to run that validation
+  with real hardware.
+- **Live demo** (Issue #18): done. `hex8 live-demo [--device N]` opens a
+  live camera preview window and overlays the decode result (marker
+  outline + recovered payload or failure reason) on each frame in real
+  time - green outline + decoded text (UTF-8, or a hex dump if not valid
+  UTF-8) on success, red outline (or none, if no marker was found at all) +
+  failure category on failure. The status text is drawn on a solid dark
+  background so it stays legible regardless of what's under it (a plain
+  `cv2.putText` call alone is invisible against a marker's own white
+  background). Requires the separate `demo` extras group (`pip install
+  hex8[demo]`), which installs plain `opencv-python` (unlike the `decoder`
+  extras group's `opencv-python-headless`, this build supports GUI windows
+  via `cv2.imshow`) plus `scikit-image`, so `demo` alone is enough to run
+  the full decode pipeline without also installing `decoder`. The `decoder`
+  and `demo` groups are mutually exclusive; do not install both in the same
+  environment (their `opencv-python`/`opencv-python-headless` builds
+  conflict at the package level). Manually verified end-to-end in this
+  project's sandbox by feeding a rendered marker into its `v4l2loopback`
+  device and confirming the preview window's overlay via screenshot - see
+  `docs/phase4-manual-test-guide.md`'s "Live demo" section; this is not a
+  substitute for validation against real external camera hardware (still
+  Issue #16's job).
+- **Cosmetic issue found while verifying Issue #18** (tracked as Issue
+  #19, not fixed): a marker whose payload is much smaller than its
+  radius's data-cell capacity renders with a large contiguous *blank*
+  region on one side, because unused `DATA` cells are filled from a fixed
+  `(q, r)`-ordered position rather than scattered evenly - see Issue #19
+  for the root cause. Purely visual; `decode_image` round-trips correctly
+  regardless, and it does not affect payloads near the README's own
+  "realistic PoC target" (128-256 bytes at `R = 18-20`).
 - One capacity note found while implementing: at the default 30% ECC rate,
   a 256-byte payload needs `R = 20` (not `R = 18`) once Reed-Solomon parity
   and framing overhead are accounted for - see `docs/marker-layout.md` for

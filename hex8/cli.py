@@ -1,6 +1,7 @@
 """Command-line entry point for the Hex8 marker encoder/decoder.
 
-`hex8 encode ...` (Issue #8) and `hex8 decode ...` (Issue #12).
+`hex8 encode ...` (Issue #8), `hex8 decode ...` (Issue #12), and
+`hex8 live-demo ...` (Issue #18).
 """
 
 from __future__ import annotations
@@ -50,6 +51,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     decode_parser.add_argument("output", type=Path, help="Path to write the recovered payload to")
 
+    live_demo_parser = subparsers.add_parser(
+        "live-demo", help="Live camera preview with a real-time marker decode overlay"
+    )
+    live_demo_parser.add_argument(
+        "--device", type=int, default=0, help="Camera device index (default: 0)"
+    )
+
     return parser
 
 
@@ -88,13 +96,29 @@ def _run_decode(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_live_demo(args: argparse.Namespace) -> int:
+    try:
+        from hex8.camera.live_demo import run_live_demo
+    except ImportError:
+        print(
+            "hex8: error: live-demo requires the 'demo' optional dependency group "
+            "(pip install hex8[demo])",
+            file=sys.stderr,
+        )
+        return 2
+
+    return run_live_demo(device_index=args.device)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
     if args.command == "encode":
         return _run_encode(args)
-    return _run_decode(args)
+    if args.command == "decode":
+        return _run_decode(args)
+    return _run_live_demo(args)
 
 
 if __name__ == "__main__":
