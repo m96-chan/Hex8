@@ -1,7 +1,6 @@
-"""Command-line entry point for the Hex8 marker encoder (`hex8 encode ...`).
+"""Command-line entry point for the Hex8 marker encoder/decoder.
 
-Decoding (`hex8 decode ...`) is added by Issue #12, once the decoder
-pipeline exists.
+`hex8 encode ...` (Issue #8) and `hex8 decode ...` (Issue #12).
 """
 
 from __future__ import annotations
@@ -10,6 +9,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from hex8.decoder.decode import decode_file
 from hex8.encoder.encode import MAX_ECC_LEVEL, MIN_ECC_LEVEL, encode_png, encode_svg
 
 __all__ = ["main"]
@@ -42,16 +42,18 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Center-to-vertex pixel size of each hex cell (default: 10.0)",
     )
 
+    decode_parser = subparsers.add_parser(
+        "decode", help="Decode a Hex8 marker image back into its payload file"
+    )
+    decode_parser.add_argument(
+        "input", type=Path, help="Path to the marker image (raster, e.g. PNG - not .svg)"
+    )
+    decode_parser.add_argument("output", type=Path, help="Path to write the recovered payload to")
+
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
-    # `encode` is the only subcommand registered so far (add_subparsers'
-    # required=True makes argparse itself reject anything else), so no
-    # further command dispatch/fallback is needed until `decode` (Issue #12).
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
+def _run_encode(args: argparse.Namespace) -> int:
     payload = args.input.read_bytes()
     suffix = args.output.suffix.lower()
 
@@ -73,6 +75,26 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     return 0
+
+
+def _run_decode(args: argparse.Namespace) -> int:
+    try:
+        payload = decode_file(args.input)
+    except ValueError as exc:
+        print(f"hex8: error: {exc}", file=sys.stderr)
+        return 1
+
+    args.output.write_bytes(payload)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "encode":
+        return _run_encode(args)
+    return _run_decode(args)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Tests for hex8.cli (Issue #8's `hex8 encode` CLI)."""
+"""Tests for hex8.cli (Issue #8's `hex8 encode` and Issue #12's `hex8 decode` CLI)."""
 
 from PIL import Image
 
@@ -63,6 +63,30 @@ def test_cli_encode_rejects_unsupported_output_extension(tmp_path):
     output_path = tmp_path / "marker.bmp"
 
     exit_code = main(["encode", str(input_path), str(output_path)])
+
+    assert exit_code != 0
+    assert not output_path.exists()
+
+
+def test_cli_decode_round_trips_a_cli_encoded_marker(tmp_path):
+    input_path, payload = _write_payload(tmp_path)
+    marker_path = tmp_path / "marker.png"
+    output_path = tmp_path / "recovered.bin"
+
+    assert main(["encode", str(input_path), str(marker_path)]) == 0
+    exit_code = main(["decode", str(marker_path), str(output_path)])
+
+    assert exit_code == 0
+    assert output_path.read_bytes() == payload
+
+
+def test_cli_decode_rejects_svg_input(tmp_path):
+    input_path, _payload = _write_payload(tmp_path, size=16)
+    marker_path = tmp_path / "marker.svg"
+    output_path = tmp_path / "recovered.bin"
+
+    assert main(["encode", str(input_path), str(marker_path)]) == 0
+    exit_code = main(["decode", str(marker_path), str(output_path)])
 
     assert exit_code != 0
     assert not output_path.exists()
