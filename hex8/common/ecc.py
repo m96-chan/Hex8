@@ -101,14 +101,25 @@ def _validate_ecc_rate(ecc_rate: float) -> None:
 def _nsym_for_block_data_len(block_data_len: int, ecc_rate: float) -> int:
     """Solve nsym = round((block_data_len + nsym) * ecc_rate) via fixed-point
     iteration. This converges because ecc_rate < 1 makes the update a
-    contraction mapping."""
+    contraction mapping.
+
+    The result is always at least 1: `reedsolo`'s own `RSCodec.decode()`
+    slices the corrected message out of the codeword as `data[:-nsym]`, and
+    `data[:-0]` is `data[:0]` in Python (negative-zero slicing does not mean
+    "no bytes removed from the end" - it means "keep zero bytes"), which
+    silently returns an empty message instead of the real data whenever
+    `nsym == 0`. A tiny payload's `round(block_data_len * ecc_rate)` can
+    legitimately compute to 0 (e.g. a 1-byte block at any rate in
+    [0.25, 0.40] rounds to 0), so this floor is required for correctness,
+    not just for "some" error correction capability.
+    """
     nsym = round(block_data_len * ecc_rate)
     for _ in range(32):
         new_nsym = round((block_data_len + nsym) * ecc_rate)
         if new_nsym == nsym:
             break
         nsym = new_nsym
-    return nsym
+    return max(1, nsym)
 
 
 def _plan_blocks(data_len: int, ecc_rate: float) -> tuple[int, int, int]:
@@ -189,7 +200,28 @@ def encode(data: bytes, ecc_rate: float = 0.3, interleave: bool = True) -> bytes
     return header + body
 
 
-def decode(data: bytes, ecc_rate: float = 0.3, interleave: bool = True) -> bytes:
+def _body_position_to_block_position(
+    position: int, num_blocks: int, block_total_len: int, interleave: bool
+) -> tuple[int, int]:
+    """Map a byte offset within the (possibly interleaved) body to
+    (block_index, within_block_index).
+
+    Inverse of `_interleave`'s `out[j::num_blocks] = block` assignment: body
+    position `p` in the interleaved stream belongs to block `p % num_blocks`
+    at within-block index `p // num_blocks`. When not interleaved, blocks are
+    simply concatenated, so block index is `p // block_total_len`.
+    """
+    if interleave:
+        return position % num_blocks, position // num_blocks
+    return position // block_total_len, position % block_total_len
+
+
+def decode(
+    data: bytes,
+    ecc_rate: float = 0.3,
+    interleave: bool = True,
+    erasure_body_positions: set[int] | None = None,
+) -> bytes:
     """Decode bytes produced by `encode()`, correcting errors introduced by
     RS ECC and reversing interleaving, returning the original data.
 
@@ -203,6 +235,17 @@ def decode(data: bytes, ecc_rate: float = 0.3, interleave: bool = True) -> bytes
         interleave: Must match the value passed to the corresponding
             `encode()` call. Cross-checked against the internal header;
             a mismatch raises `ValueError`.
+        erasure_body_positions: Optional 0-indexed byte offsets within the
+            body (`data[HEADER_SIZE:]`, i.e. the same coordinate space as
+            the encoded bytes themselves - *not* per-block indices) that
+            are already known to be unreliable (e.g. from low-confidence
+            color classification upstream), and should be treated as
+            Reed-Solomon erasures rather than unknown errors. Reed-Solomon
+            can correct up to `nsym` erasures per block, twice as many as
+            the `nsym // 2` unknown-position errors it can correct without
+            this hint. Positions outside the valid body range are silently
+            ignored (callers may pass slightly-approximate hints). Ignored
+            entirely if `None` (the default).
 
     Returns:
         The original data bytes.
@@ -250,11 +293,22 @@ def decode(data: bytes, ecc_rate: float = 0.3, interleave: bool = True) -> bytes
             body[i * block_total_len : (i + 1) * block_total_len] for i in range(num_blocks)
         ]
 
+    erase_pos_by_block: dict[int, list[int]] = {i: [] for i in range(num_blocks)}
+    if erasure_body_positions:
+        for position in erasure_body_positions:
+            if not (0 <= position < expected_body_len):
+                continue  # out-of-range hint, silently ignored
+            block_index, within_block_index = _body_position_to_block_position(
+                position, num_blocks, block_total_len, interleave
+            )
+            erase_pos_by_block[block_index].append(within_block_index)
+
     rsc = RSCodec(nsym)
     decoded_chunks = []
-    for block in blocks:
+    for i, block in enumerate(blocks):
+        erase_pos = erase_pos_by_block[i] or None
         try:
-            decoded_msg, _decoded_msgecc, _errata_pos = rsc.decode(block)
+            decoded_msg, _decoded_msgecc, _errata_pos = rsc.decode(block, erase_pos=erase_pos)
         except ReedSolomonError as exc:
             raise ValueError(f"Reed-Solomon decoding failed: {exc}") from exc
         decoded_chunks.append(bytes(decoded_msg))
