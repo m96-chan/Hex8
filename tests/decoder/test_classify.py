@@ -50,13 +50,19 @@ def canvas():
     return compute_canvas(RADIUS, CELL_SIZE)
 
 
+@pytest.fixture(scope="module")
+def project(canvas):
+    """Ideal-case cell->pixel projector (the callable classify functions take)."""
+    return lambda q, r: cell_center_px(q, r, CELL_SIZE, canvas)
+
+
 class TestBuildObservedPalette:
-    def test_returns_all_eight_symbols(self, rendered_image, canvas):
-        observed = build_observed_palette(rendered_image, RADIUS, CELL_SIZE, canvas)
+    def test_returns_all_eight_symbols(self, rendered_image, project):
+        observed = build_observed_palette(rendered_image, RADIUS, project)
         assert set(observed.keys()) == set(range(8))
 
-    def test_matches_ideal_palette_lab_values(self, rendered_image, canvas):
-        observed = build_observed_palette(rendered_image, RADIUS, CELL_SIZE, canvas)
+    def test_matches_ideal_palette_lab_values(self, rendered_image, project):
+        observed = build_observed_palette(rendered_image, RADIUS, project)
         for symbol, ideal_rgb in PALETTE.items():
             ideal_lab = _rgb_to_lab(ideal_rgb)
             observed_lab = observed[symbol]
@@ -134,15 +140,13 @@ class TestClassifyPixel:
 
 
 class TestClassifyCells:
-    def test_recovers_known_encoded_symbols_on_data_cells(self, rendered_image, canvas):
+    def test_recovers_known_encoded_symbols_on_data_cells(self, rendered_image, canvas, project):
         layout = build_layout(RADIUS)
-        observed_palette = build_observed_palette(
-            rendered_image, RADIUS, CELL_SIZE, canvas
-        )
+        observed_palette = build_observed_palette(rendered_image, RADIUS, project)
 
         data_cells = layout.cells_with_role(CellRole.DATA)[:10]
         results = classify_cells(
-            rendered_image, data_cells, CELL_SIZE, canvas, observed_palette
+            rendered_image, data_cells, project, observed_palette
         )
 
         assert set(results.keys()) == set(data_cells)

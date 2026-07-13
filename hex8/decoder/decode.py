@@ -55,19 +55,22 @@ def decode_image(image: Image.Image) -> bytes:
     """
     detection = detect_marker(image)
     layout = build_layout(detection.radius)
-    observed_palette = build_observed_palette(
-        image, detection.radius, detection.cell_size, detection.canvas
-    )
+    # DetectionResult.cell_center transparently uses either the ideal-case
+    # affine placement (fast path) or a perspective homography (Phase 3
+    # robust fallback), so every downstream cell-sampling call below is
+    # geometry-agnostic (see hex8.decoder.detect).
+    project = detection.cell_center
+    observed_palette = build_observed_palette(image, detection.radius, project)
 
     metadata_cells = layout.cells_with_role(CellRole.METADATA)
     metadata_classifications_by_cell = classify_cells(
-        image, metadata_cells, detection.cell_size, detection.canvas, observed_palette
+        image, metadata_cells, project, observed_palette
     )
     metadata_classifications = [metadata_classifications_by_cell[cell] for cell in metadata_cells]
 
     data_cells = layout.cells_with_role(CellRole.DATA)
     data_classifications_by_cell = classify_cells(
-        image, data_cells, detection.cell_size, detection.canvas, observed_palette
+        image, data_cells, project, observed_palette
     )
     data_classifications = [data_classifications_by_cell[cell] for cell in data_cells]
 

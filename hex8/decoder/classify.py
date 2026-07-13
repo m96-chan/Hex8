@@ -42,17 +42,29 @@ second-nearest. This is a normalized margin, a standard way to turn a
 Low-confidence cells (``confidence < LOW_CONFIDENCE_THRESHOLD``) may later
 be treated as erasures for Reed-Solomon correction (Issue #11) - this
 module only exposes the confidence score and the ``low_confidence`` flag.
+
+Cell-position abstraction (Issue #14)
+-------------------------------------
+:func:`build_observed_palette` and :func:`classify_cells` do not compute
+cell pixel positions themselves; the caller supplies a ``project`` callable
+mapping an axial ``(q, r)`` cell coordinate to its ``(x, y)`` pixel center
+in the image. This keeps the classifier agnostic to *how* that mapping was
+recovered: the ideal fast path (Issue #9) uses a simple
+``cell_size``/``canvas`` affine placement, while the Phase 3 robust fallback
+(Issue #14) uses a full perspective homography. Both are exposed uniformly
+via :meth:`hex8.decoder.detect.DetectionResult.cell_center`, which is the
+``project`` callable normally passed here.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image
 from skimage.color import rgb2lab
 
-from hex8.common.canvas import CanvasInfo, cell_center_px
 from hex8.common.layout import CellRole, PALETTE_REPEATS, build_layout
 from hex8.common.symbols import PALETTE
 
@@ -60,17 +72,36 @@ Cell = tuple[int, int]
 RGB = tuple[int, int, int]
 Lab = tuple[float, float, float]
 
+#: A callable mapping an axial ``(q, r)`` cell coordinate to its ``(x, y)``
+#: pixel center in the image being decoded (see the module docstring's
+#: "Cell-position abstraction" note). Normally
+#: :meth:`hex8.decoder.detect.DetectionResult.cell_center`.
+CellCenterFn = Callable[[int, int], tuple[float, float]]
+
 __all__ = [
     "LOW_CONFIDENCE_THRESHOLD",
+    "CellCenterFn",
     "Classification",
     "build_observed_palette",
     "classify_cells",
     "classify_pixel",
 ]
 
-#: Documented default confidence threshold below which a classification is
-#: flagged as low-confidence. May be retuned in Issue #14.
-LOW_CONFIDENCE_THRESHOLD = 0.2
+#: Confidence threshold below which a classification is flagged as
+#: low-confidence (and later treated as a Reed-Solomon erasure candidate,
+#: see :mod:`hex8.decoder.correct`).
+#:
+#: Retuned from the Issue #10 default of ``0.2`` down to ``0.1`` in Issue #14
+#: (as that module's docstring anticipated). Empirically, the original ``0.2``
+#: was too aggressive under mild global degradation (e.g. a small Gaussian
+#: blur): it flagged so many correctly-classified-but-slightly-softened data
+#: cells as erasures that the Reed-Solomon block's erasure budget was
+#: exhausted and decoding failed, even though the symbols were in fact
+#: recovered correctly. At ``0.1`` the correctly-classified cells under mild
+#: blur/JPEG/noise sit comfortably above the threshold, while genuinely
+#: ambiguous near-tie cells (e.g. a 50% black/white midpoint, whose
+#: normalized-margin confidence is ~0.07) are still flagged as erasures.
+LOW_CONFIDENCE_THRESHOLD = 0.1
 
 
 @dataclass(frozen=True)
@@ -109,19 +140,25 @@ def _sample_pixel(image: Image.Image, x: float, y: float) -> RGB:
 
 
 def build_observed_palette(
-    image: Image.Image, radius: int, cell_size: float, canvas: CanvasInfo
+    image: Image.Image, radius: int, project: CellCenterFn
 ) -> dict[int, Lab]:
     """Sample the marker's palette cells and average each symbol's Lab value.
 
     For each symbol 0-7, averages the Lab-space values of all
     ``PALETTE_REPEATS`` palette cells assigned that symbol, sampling each
-    cell's pixel at its center via :func:`hex8.common.canvas.cell_center_px`
-    (rounded to the nearest int pixel).
+    cell's pixel at the center returned by ``project`` (rounded to the
+    nearest int pixel).
 
     The i-th palette cell in
     ``build_layout(radius).cells_with_role(CellRole.PALETTE)`` corresponds
     to symbol ``i % len(PALETTE)`` (the encoder's assignment convention,
     see :mod:`hex8.encoder.encode`).
+
+    Args:
+        image: The marker image being decoded.
+        radius: The detected grid radius.
+        project: Maps an axial ``(q, r)`` cell to its ``(x, y)`` pixel center
+            (see :data:`CellCenterFn`).
 
     Returns:
         A dict ``{symbol: (L, a, b)}`` covering all 8 symbols.
@@ -136,7 +173,7 @@ def build_observed_palette(
 
     for i, cell in enumerate(palette_cells):
         symbol = i % len(PALETTE)
-        x, y = cell_center_px(cell[0], cell[1], cell_size, canvas)
+        x, y = project(cell[0], cell[1])
         pixel_rgb = _sample_pixel(image, x, y)
         lab = _rgb_to_lab(pixel_rgb)
         sums = symbol_lab_sums[symbol]
@@ -197,19 +234,19 @@ def classify_pixel(
 def classify_cells(
     image: Image.Image,
     cells: list[Cell],
-    cell_size: float,
-    canvas: CanvasInfo,
+    project: CellCenterFn,
     observed_palette: dict[int, Lab],
 ) -> dict[Cell, Classification]:
     """Sample and classify a batch of cells' pixel centers.
 
     Convenience wrapper around :func:`classify_pixel` for a batch of
     ``(q, r)`` cells (e.g. the DATA or METADATA cells from a
-    :class:`hex8.common.layout.MarkerLayout`).
+    :class:`hex8.common.layout.MarkerLayout`). Each cell's pixel center is
+    located via ``project`` (see :data:`CellCenterFn`).
     """
     results: dict[Cell, Classification] = {}
     for cell in cells:
-        x, y = cell_center_px(cell[0], cell[1], cell_size, canvas)
+        x, y = project(cell[0], cell[1])
         pixel_rgb = _sample_pixel(image, x, y)
         results[cell] = classify_pixel(pixel_rgb, observed_palette)
     return results

@@ -285,20 +285,23 @@ def test_run_harness_no_degradation_passes():
 
 
 def test_run_harness_real_degradation_reports_failure_honestly():
-    """A moderate rotation is expected to break the ideal-case-only decoder
-    today (Issue #14 hasn't landed geometric robustness yet). This is not a
-    bug: it's the honest current baseline."""
+    """A degradation beyond the decoder's tolerance must be reported honestly
+    (passed=False, error set), not papered over. Issue #14 gave the decoder
+    geometric/photometric robustness for *mild* degradation, so a case that
+    still fails must now be genuinely severe: a heavy Gaussian blur (5.0 px at
+    cell_size 6.0) smears whole cells together, well past the ~1.5 px mild
+    blur threshold, and does not decode."""
     payload = _sample_payload(16)
     radius = 18
     ecc_level = 30
     cell_size = 6.0
 
-    cases = [("rotation", [("rotation", 15.0)])]
+    cases = [("blur", [("blur", 5.0)])]
     results = run_harness(payload, radius, ecc_level, cell_size, cases)
 
     assert len(results) == 1
     result = results[0]
-    assert result.degradation == "rotation"
+    assert result.degradation == "blur"
     assert result.passed is False
     assert result.error is not None
 
@@ -311,11 +314,13 @@ def test_run_harness_records_multiple_cases():
 
     cases = [
         ("identity", []),
-        ("rotation", [("rotation", 20.0)]),
+        # Heavy blur (well beyond the ~1.5 px mild threshold at cell_size 6.0)
+        # still fails, giving a mixed pass/fail set to record.
+        ("blur", [("blur", 5.0)]),
     ]
     results = run_harness(payload, radius, ecc_level, cell_size, cases)
 
-    assert [r.degradation for r in results] == ["identity", "rotation"]
+    assert [r.degradation for r in results] == ["identity", "blur"]
     assert results[0].passed is True
     assert results[1].passed is False
 
