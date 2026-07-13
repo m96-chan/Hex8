@@ -11,12 +11,15 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.26",
     "reedsolo>=1.7",
+    "pillow>=10.0",
 ]
 
 [project.optional-dependencies]
-encoder = ["pillow>=10.0"]
 decoder = ["opencv-python-headless>=4.9", "scikit-image>=0.22"]
 dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.4"]
+
+[project.scripts]
+hex8 = "hex8.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["hex8*"]

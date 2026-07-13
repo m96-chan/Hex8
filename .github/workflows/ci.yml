@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install package with all extras
-        run: pip install -e ".[encoder,decoder,dev]"
+        run: pip install -e ".[decoder,dev]"
 
       - name: Lint (ruff)
         run: ruff check .
