@@ -342,7 +342,7 @@ Why:
 
 ## Implementation Plan
 
-### Phase 1: Encoder Only
+### Phase 1: Encoder Only (done)
 
 - Encode arbitrary bytes
 - Generate ideal PNG/SVG marker
@@ -354,7 +354,7 @@ Success condition:
 payload bytes -> marker image
 ```
 
-### Phase 2: Ideal Decoder
+### Phase 2: Ideal Decoder (done)
 
 - Decode generated PNG directly
 - No camera distortion
@@ -367,7 +367,7 @@ Success condition:
 payload bytes -> marker image -> same payload bytes
 ```
 
-### Phase 3: Synthetic Degradation
+### Phase 3: Synthetic Degradation (done)
 
 Test with:
 
@@ -385,7 +385,7 @@ Success condition:
 decoder survives mild image degradation
 ```
 
-### Phase 4: Camera Test
+### Phase 4: Camera Test (pipeline built, pending real-hardware validation)
 
 Test:
 
@@ -408,7 +408,8 @@ Encoder:
 
 - Python
 - Pillow
-- CairoSVG or SVG output
+- Plain SVG output (hand-generated XML from hex-vertex math, not CairoSVG -
+  avoids a native libcairo dependency; see `hex8/encoder/render.py`)
 - NumPy
 
 Decoder:
@@ -506,20 +507,45 @@ cell symbol + confidence
 
 ## Current Status
 
-PoC planning stage.
-
-Initial target:
+Phases 1-3 complete and tested; Phase 4 pipeline built, pending real-world
+validation.
 
 ```text
 Hex8 Marker v0
 R = 18 to 20
 8 colors
 single-color hex cells
-128 to 256 byte payload
 Reed-Solomon ECC
 PNG/SVG encoder
-ideal decoder
+ideal + mild-degradation-tolerant decoder
 ```
+
+- **Phase 1 (Encoder)**: done. `hex8 encode <payload> marker.png` (or
+  `.svg`) via `hex8.encoder.encode`. SVG is emitted as plain XML, not via
+  CairoSVG - see "Recommended Tech Stack" below for why.
+- **Phase 2 (Ideal decoder)**: done. `hex8 decode marker.png out.bin`
+  round-trips exactly for a pristine render.
+- **Phase 3 (Synthetic degradation)**: done. `hex8.degrade` provides the 7
+  degradation types plus a harness; `hex8.decoder.detect` now falls back to
+  a homography-based detector (anchor correspondence + perspective
+  transform) when the exact ideal path fails, recovering the payload under
+  documented "mild" thresholds - see `hex8/decoder/detect.py`'s module
+  docstring and `docs/phase3-baseline.md` for the full before/after
+  numbers (15/40 -> 34/40 synthetic test cases).
+- **Phase 4 (Camera test)**: pipeline built (`hex8.camera.capture`:
+  file/live-device ingestion + failure-categorized decoding), but **not yet
+  validated against a real camera or printer** - this project's dev
+  environment has neither. See `docs/phase4-manual-test-guide.md` for the
+  steps to run that validation with real hardware.
+- One capacity note found while implementing: at the default 30% ECC rate,
+  a 256-byte payload needs `R = 20` (not `R = 18`) once Reed-Solomon parity
+  and framing overhead are accounted for - see `docs/marker-layout.md` for
+  the exact per-radius capacity table.
+- Finder anchor design decision (README originally left this open): **6
+  outer vertex anchors**, not 3 major anchor clusters - see
+  `docs/marker-layout.md`.
+
+Run `pip install -e ".[decoder,dev]"` then `pytest` to verify locally.
 
 ---
 
